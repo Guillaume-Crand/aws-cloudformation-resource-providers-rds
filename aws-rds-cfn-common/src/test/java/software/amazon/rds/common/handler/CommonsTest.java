@@ -1,5 +1,6 @@
 package software.amazon.rds.common.handler;
 
+import static org.assertj.core.api.Assertions.as;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.concurrent.atomic.AtomicReference;
@@ -37,6 +38,18 @@ public class CommonsTest {
         final ErrorStatus status = Commons.DEFAULT_ERROR_RULE_SET.handle(newAwsServiceException(ErrorCode.NotAuthorized));
         assertThat(status).isInstanceOf(HandlerErrorStatus.class);
         assertThat(((HandlerErrorStatus) status).getHandlerErrorCode()).isEqualTo(HandlerErrorCode.AccessDenied);
+    }
+
+    @Test
+    public void handle_AlreadyExistsException() {
+        final ErrorRuleSet errorRuleSet =  ErrorRuleSet.extend(ErrorRuleSet.EMPTY_RULE_SET)
+                .withErrorClasses(ErrorStatus.failWith(HandlerErrorCode.AlreadyExists), RuntimeException.class)
+                .build();
+
+        final ProgressEvent<Void, Void> progress = new ProgressEvent<>();
+        final ProgressEvent<Void, Void> handledExceptionProgress = Commons.handleException(progress, new RuntimeException(), errorRuleSet);
+        assertThat(handledExceptionProgress.getResourceModel()).isNull();
+        assertThat(handledExceptionProgress.getCallbackContext()).isNull();
     }
 
     @Test
@@ -78,7 +91,7 @@ public class CommonsTest {
     public void handleException_Ignore() {
         final ProgressEvent<Void, Void> event = new ProgressEvent<>();
         final Exception exception = new RuntimeException("test exception");
-        final ErrorRuleSet ruleSet = ErrorRuleSet.builder()
+        final ErrorRuleSet ruleSet = ErrorRuleSet.extend(ErrorRuleSet.EMPTY_RULE_SET)
                 .withErrorClasses(ErrorStatus.ignore(), RuntimeException.class)
                 .build();
         final ProgressEvent<Void, Void> resultEvent = Commons.handleException(event, exception, ruleSet);
@@ -90,7 +103,7 @@ public class CommonsTest {
     public void handleException_HandlerError() {
         final ProgressEvent<Void, Void> event = new ProgressEvent<>();
         final Exception exception = new RuntimeException("test exception");
-        final ErrorRuleSet ruleSet = ErrorRuleSet.builder()
+        final ErrorRuleSet ruleSet = ErrorRuleSet.extend(ErrorRuleSet.EMPTY_RULE_SET)
                 .withErrorClasses(ErrorStatus.failWith(HandlerErrorCode.InvalidRequest), RuntimeException.class)
                 .build();
         final ProgressEvent<Void, Void> resultEvent = Commons.handleException(event, exception, ruleSet);
@@ -103,7 +116,7 @@ public class CommonsTest {
     public void handleException_UnknownError() {
         final ProgressEvent<Void, Void> event = new ProgressEvent<>();
         final Exception exception = new RuntimeException("test exception");
-        final ErrorRuleSet ruleSet = ErrorRuleSet.builder().build();
+        final ErrorRuleSet ruleSet = ErrorRuleSet.extend(ErrorRuleSet.EMPTY_RULE_SET).build();
         final ProgressEvent<Void, Void> resultEvent = Commons.handleException(event, exception, ruleSet);
         assertThat(resultEvent).isNotNull();
         assertThat(resultEvent.isFailed()).isTrue();
@@ -154,5 +167,19 @@ public class CommonsTest {
                 .awsErrorDetails(AwsErrorDetails.builder()
                         .errorCode(errorCode.toString())
                         .build()).build();
+    }
+
+    static class TaggingCallbackContext implements TaggingContext.Provider {
+
+        private final TaggingContext taggingContext;
+
+        public TaggingCallbackContext() {
+            this.taggingContext = new TaggingContext();
+        }
+
+        @Override
+        public TaggingContext getTaggingContext() {
+            return this.taggingContext;
+        }
     }
 }

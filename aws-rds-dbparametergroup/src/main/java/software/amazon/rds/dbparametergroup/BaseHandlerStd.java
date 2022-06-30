@@ -16,7 +16,6 @@ import software.amazon.awssdk.services.rds.model.DbParameterGroupNotFoundExcepti
 import software.amazon.awssdk.services.rds.model.DbParameterGroupQuotaExceededException;
 import software.amazon.awssdk.services.rds.model.InvalidDbParameterGroupStateException;
 import software.amazon.awssdk.services.rds.model.Parameter;
-import software.amazon.cloudformation.exceptions.CfnInvalidRequestException;
 import software.amazon.cloudformation.proxy.AmazonWebServicesClientProxy;
 import software.amazon.cloudformation.proxy.HandlerErrorCode;
 import software.amazon.cloudformation.proxy.Logger;
@@ -35,7 +34,9 @@ import software.amazon.rds.common.logging.RequestLogger;
 import software.amazon.rds.common.printer.FilteredJsonPrinter;
 
 public abstract class BaseHandlerStd extends BaseHandler<CallbackContext> {
-    protected static final ErrorRuleSet DEFAULT_DB_PARAMETER_GROUP_ERROR_RULE_SET = ErrorRuleSet.builder()
+
+    protected static final ErrorRuleSet DEFAULT_DB_PARAMETER_GROUP_ERROR_RULE_SET = ErrorRuleSet
+            .extend(Commons.DEFAULT_ERROR_RULE_SET)
             .withErrorClasses(ErrorStatus.failWith(HandlerErrorCode.ResourceConflict),
                     InvalidDbParameterGroupStateException.class)
             .withErrorClasses(ErrorStatus.failWith(HandlerErrorCode.AlreadyExists),
@@ -44,14 +45,14 @@ public abstract class BaseHandlerStd extends BaseHandler<CallbackContext> {
                     DbParameterGroupNotFoundException.class)
             .withErrorClasses(ErrorStatus.failWith(HandlerErrorCode.ServiceLimitExceeded),
                     DbParameterGroupQuotaExceededException.class)
-            .build()
-            .orElse(Commons.DEFAULT_ERROR_RULE_SET);
-    protected static final ErrorRuleSet SOFT_FAIL_NPROGRESS_TAGGING_ERROR_RULE_SET = ErrorRuleSet.builder()
+            .build();
+
+    protected static final ErrorRuleSet SOFT_FAIL_NPROGRESS_TAGGING_ERROR_RULE_SET = ErrorRuleSet
+            .extend(DEFAULT_DB_PARAMETER_GROUP_ERROR_RULE_SET)
             .withErrorCodes(ErrorStatus.ignore(OperationStatus.IN_PROGRESS),
                     ErrorCode.AccessDenied,
                     ErrorCode.AccessDeniedException)
-            .build()
-            .orElse(DEFAULT_DB_PARAMETER_GROUP_ERROR_RULE_SET);
+            .build();
 
     protected static int MAX_LENGTH_GROUP_NAME = 255;
     protected static final int NO_CALLBACK_DELAY = 0;
@@ -109,8 +110,14 @@ public abstract class BaseHandlerStd extends BaseHandler<CallbackContext> {
             return Commons.handleException(
                     progress,
                     exception,
-                    Tagging.bestEffortErrorRuleSet(tagsToAdd, tagsToRemove, Tagging.SOFT_FAIL_IN_PROGRESS_TAGGING_ERROR_RULE_SET, Tagging.HARD_FAIL_TAG_ERROR_RULE_SET)
-                            .orElse(DEFAULT_DB_PARAMETER_GROUP_ERROR_RULE_SET)
+                    DEFAULT_DB_PARAMETER_GROUP_ERROR_RULE_SET.extendWith(
+                            Tagging.bestEffortErrorRuleSet(
+                                    tagsToAdd,
+                                    tagsToRemove,
+                                    Tagging.SOFT_FAIL_IN_PROGRESS_TAGGING_ERROR_RULE_SET,
+                                    Tagging.HARD_FAIL_TAG_ERROR_RULE_SET
+                            )
+                    )
             );
         }
 
@@ -312,12 +319,16 @@ public abstract class BaseHandlerStd extends BaseHandler<CallbackContext> {
                                 DEFAULT_DB_PARAMETER_GROUP_ERROR_RULE_SET
                         ))
                 .done((describeDbParameterGroupsRequest, describeDbParameterGroupsResponse, proxyInvocation, resourceModel, context) -> {
-                    currentDBParameters.putAll(
-                            describeDbParameterGroupsResponse.stream()
-                                    .flatMap(describeDbParametersResponse -> describeDbParametersResponse.parameters().stream())
-                                    .collect(Collectors.toMap(Parameter::parameterName, Function.identity()))
-                    );
-                    return ProgressEvent.progress(resourceModel, context);
+                    try {
+                        currentDBParameters.putAll(
+                                describeDbParameterGroupsResponse.stream()
+                                        .flatMap(describeDbParametersResponse -> describeDbParametersResponse.parameters().stream())
+                                        .collect(Collectors.toMap(Parameter::parameterName, Function.identity()))
+                        );
+                        return ProgressEvent.progress(resourceModel, context);
+                    } catch (Exception exception) {
+                        return Commons.handleException(progress, exception, DEFAULT_DB_PARAMETER_GROUP_ERROR_RULE_SET);
+                    }
                 });
     }
 
@@ -336,12 +347,17 @@ public abstract class BaseHandlerStd extends BaseHandler<CallbackContext> {
                                 DEFAULT_DB_PARAMETER_GROUP_ERROR_RULE_SET
                         ))
                 .done((describeEngineDefaultParametersRequest, describeEngineDefaultParametersResponse, proxyInvocation, resourceModel, context) -> {
-                    defaultEngineParameters.putAll(
-                            describeEngineDefaultParametersResponse.stream()
-                                    .flatMap(describeDbParametersResponse -> describeDbParametersResponse.engineDefaults().parameters().stream())
-                                    .collect(Collectors.toMap(Parameter::parameterName, Function.identity()))
-                    );
-                    return ProgressEvent.progress(resourceModel, context);
+                    try {
+                        defaultEngineParameters.putAll(
+                                describeEngineDefaultParametersResponse.stream()
+                                        .flatMap(describeDbParametersResponse -> describeDbParametersResponse.engineDefaults().parameters().stream())
+                                        .collect(Collectors.toMap(Parameter::parameterName, Function.identity()))
+                        );
+
+                        return ProgressEvent.progress(resourceModel, context);
+                    } catch (Exception exception) {
+                        return Commons.handleException(progress, exception, DEFAULT_DB_PARAMETER_GROUP_ERROR_RULE_SET);
+                    }
                 });
 
     }

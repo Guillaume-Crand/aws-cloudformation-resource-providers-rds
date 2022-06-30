@@ -14,10 +14,7 @@ import software.amazon.rds.common.error.IgnoreErrorStatus;
 
 public final class Commons {
 
-    private Commons() {
-    }
-
-    public static final ErrorRuleSet DEFAULT_ERROR_RULE_SET = ErrorRuleSet.builder()
+    public static final ErrorRuleSet DEFAULT_ERROR_RULE_SET = ErrorRuleSet.extend(ErrorRuleSet.EMPTY_RULE_SET)
             .withErrorCodes(ErrorStatus.failWith(HandlerErrorCode.ServiceInternalError),
                     ErrorCode.ClientUnavailable,
                     ErrorCode.InternalFailure)
@@ -26,7 +23,8 @@ public final class Commons {
                     ErrorCode.AccessDeniedException,
                     ErrorCode.NotAuthorized)
             .withErrorCodes(ErrorStatus.failWith(HandlerErrorCode.Throttling),
-                    ErrorCode.ThrottlingException)
+                    ErrorCode.ThrottlingException,
+                    ErrorCode.Throttling)
             .withErrorCodes(ErrorStatus.failWith(HandlerErrorCode.InvalidRequest),
                     ErrorCode.InvalidParameterCombination,
                     ErrorCode.InvalidParameterValue,
@@ -36,6 +34,9 @@ public final class Commons {
             .withErrorClasses(ErrorStatus.failWith(HandlerErrorCode.ServiceInternalError),
                     SdkClientException.class)
             .build();
+
+    private Commons() {
+    }
 
     public static <M, C> ProgressEvent<M, C> handleException(
             final ProgressEvent<M, C> progress,
@@ -56,6 +57,12 @@ public final class Commons {
             }
         } else if (errorStatus instanceof HandlerErrorStatus) {
             final HandlerErrorStatus handlerErrorStatus = (HandlerErrorStatus) errorStatus;
+            // We need to set model and context to null in case of AlreadyExists errors
+            // If we not set model and context to null, CFN will attempt to perform delete of the resource it has attempted to create,
+            // even if resource belongs to a different stack altogether, or was created out of bounds
+            if (handlerErrorStatus.getHandlerErrorCode() == HandlerErrorCode.AlreadyExists) {
+                return ProgressEvent.failed(null, null, handlerErrorStatus.getHandlerErrorCode(), exception.getMessage());
+            }
             return ProgressEvent.failed(model, context, handlerErrorStatus.getHandlerErrorCode(), exception.getMessage());
         }
 
